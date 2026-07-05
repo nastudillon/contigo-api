@@ -92,6 +92,13 @@ const findAll = async ({ category, location, search, sort } = {}) => {
             OR COALESCE(s_search.description, '') ILIKE $${paramIndex}
           )
       )
+      OR EXISTS (
+        SELECT 1
+        FROM provider_certifications pc_search
+        JOIN certifications cert_search ON cert_search.id = pc_search.certification_id
+        WHERE pc_search.provider_id = p.id
+          AND cert_search.label ILIKE $${paramIndex}
+      )
     )`);
     params.push(`%${search}%`);
     paramIndex++;
@@ -260,6 +267,27 @@ const findServicesByProviderId = async (providerId) => {
   return rows;
 };
 
+
+/**
+ * Obtiene el resumen de especialidades activas/inactivas del prestador en orden de creacion.
+ */
+const findSpecialtiesByProviderId = async (providerId) => {
+  const { rows } = await pool.query(
+    `SELECT ps.id,
+            ps.category_id,
+            ps.is_active,
+            c.slug,
+            c.label,
+            c.icon
+     FROM provider_specialties ps
+     JOIN categories c ON c.id = ps.category_id
+     WHERE ps.provider_id = $1
+     ORDER BY ps.created_at, ps.id`,
+    [providerId]
+  );
+  return rows;
+};
+
 /**
  * Obtiene las comunas de cobertura de un prestador (via provider_coverage)
  */
@@ -423,6 +451,12 @@ const replaceSpecialties = async (providerId, specialties = []) => {
     }));
 
   const primaryCategoryId = normalized.find(item => item.active)?.categoryId ?? normalized[0]?.categoryId ?? null;
+  const activeServicePrices = normalized
+    .filter((item) => item.active)
+    .flatMap((item) => item.services)
+    .map((service) => Number(String(service.price ?? '').replace(/[^0-9]/g, '')) || 0)
+    .filter((price) => price > 0);
+  const lowestActiveServicePrice = activeServicePrices.length > 0 ? Math.min(...activeServicePrices) : 0;
 
   try {
     await client.query('BEGIN');
@@ -465,9 +499,10 @@ const replaceSpecialties = async (providerId, specialties = []) => {
     await client.query(
       `UPDATE providers
        SET category_id = $1,
+           hourly_rate = $2,
            updated_at = NOW()
-       WHERE id = $2`,
-      [primaryCategoryId, providerId]
+       WHERE id = $3`,
+      [primaryCategoryId, lowestActiveServicePrice, providerId]
     );
 
     await client.query('COMMIT');
@@ -597,6 +632,7 @@ module.exports = {
   updateValidationStatus,
   autoApproveById,
   findServicesByProviderId,
+  findSpecialtiesByProviderId,
   findConditionsByProviderId,
   replaceConditions,
   findCoverageByProviderId,

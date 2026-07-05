@@ -33,6 +33,18 @@ function mapSpecialties(rows = []) {
   return [...grouped.values()];
 }
 
+
+function mapSpecialtySummaries(rows = []) {
+  return rows.map((row) => ({
+    id: row.id,
+    categoryId: row.category_id,
+    slug: row.slug,
+    label: row.label,
+    icon: row.icon || '',
+    active: row.is_active !== false,
+  }));
+}
+
 const PERIOD_TIME_BY_KEY = {
   manana: { startTime: '08:00:00', endTime: '13:00:00' },
   tarde: { startTime: '14:00:00', endTime: '19:00:00' },
@@ -102,14 +114,16 @@ const getProviders = async (filters) => {
 
   return Promise.all(
     providers.map(async (provider) => {
-      const [conditions, availabilityRows] = await Promise.all([
+      const [conditions, availabilityRows, specialtyRows] = await Promise.all([
         providersRepo.findConditionsByProviderId(provider.id),
         providersRepo.findWeeklyAvailabilityByProviderId(provider.id),
+        providersRepo.findSpecialtiesByProviderId(provider.id),
       ]);
 
       return {
         ...provider,
         conditions,
+        specialties: mapSpecialtySummaries(specialtyRows),
         avail: summarizeNextAvailability(availabilityRows),
       };
     })
