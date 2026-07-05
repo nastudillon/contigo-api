@@ -25,7 +25,6 @@ const register = async ({
   contactoTelefono,
   contactoRelacion,
 }) => {
-  // Verificar que el email no esté en uso
   const existing = await usersRepo.findByEmail(email);
   if (existing) {
     const err = new Error('El correo electrónico ya está registrado');
@@ -33,15 +32,10 @@ const register = async ({
     throw err;
   }
 
-  // Hash de la contraseña
   const passwordHash = await bcrypt.hash(password, 10);
-
-  // Crear usuario
   const user = await usersRepo.create({ name, email, phone, passwordHash, role });
 
-  // Lógica extra según rol
   if (role === 'prestador') {
-    // Buscar category_id a partir del slug de especialidad
     let categoryId = null;
     if (especialidad) {
       const category = await providersRepo.findCategoryBySlug(especialidad);
@@ -64,7 +58,6 @@ const register = async ({
     });
   }
 
-  // Generar token
   const token = generateToken({
     id: user.id,
     name: user.name,
@@ -79,7 +72,6 @@ const register = async ({
  * Autentica un usuario por email y contraseña.
  */
 const login = async ({ email, password }) => {
-  // Buscar usuario incluyendo password_hash
   const userWithHash = await usersRepo.findByEmail(email);
   if (!userWithHash) {
     const err = new Error('Credenciales inválidas');
@@ -93,7 +85,12 @@ const login = async ({ email, password }) => {
     throw err;
   }
 
-  // Verificar contraseña
+  if (!userWithHash.password_hash) {
+    const err = new Error('Esta cuenta fue registrada con Google. Usa "Continuar con Google" para iniciar sesión.');
+    err.statusCode = 409;
+    throw err;
+  }
+
   const isValid = await bcrypt.compare(password, userWithHash.password_hash);
   if (!isValid) {
     const err = new Error('Credenciales inválidas');
@@ -101,10 +98,8 @@ const login = async ({ email, password }) => {
     throw err;
   }
 
-  // Construir objeto user sin password_hash
   const { password_hash, ...user } = userWithHash;
 
-  // Generar token
   const token = generateToken({
     id: user.id,
     name: user.name,
@@ -140,7 +135,6 @@ const googleLogin = async ({ credential }) => {
     throw err;
   }
 
-  // 1. Verificar el ID token con Google
   let ticket;
   try {
     ticket = await googleClient.verifyIdToken({
@@ -154,20 +148,28 @@ const googleLogin = async ({ credential }) => {
   }
 
   const payload = ticket.getPayload();
-  const { sub: googleSub, email, name, picture } = payload;
+  const { sub: googleSub, email, email_verified: emailVerified, name, picture } = payload;
 
-  // 2. Buscar usuario por google_sub
+  if (!googleSub || !email) {
+    const err = new Error('No fue posible obtener la información básica de la cuenta Google.');
+    err.statusCode = 401;
+    throw err;
+  }
+
+  if (!emailVerified) {
+    const err = new Error('La cuenta de Google debe tener el correo verificado para iniciar sesión.');
+    err.statusCode = 401;
+    throw err;
+  }
+
   let user = await usersRepo.findByGoogleSub(googleSub);
 
   if (!user) {
-    // 3a. Buscar por email (usuario registrado previamente con contraseña)
     const existingByEmail = await usersRepo.findByEmail(email);
 
     if (existingByEmail) {
-      // Vincular cuenta existente a Google
       user = await usersRepo.linkGoogleAccount(existingByEmail.id, googleSub, picture);
     } else {
-      // 3b. Crear nuevo usuario con rol 'familiar' (rol cliente por defecto)
       user = await usersRepo.createFromGoogle({
         name,
         email,
@@ -184,7 +186,6 @@ const googleLogin = async ({ credential }) => {
     throw err;
   }
 
-  // 4. Generar JWT interno del sistema
   const token = generateToken({
     id: user.id,
     name: user.name,
@@ -200,6 +201,7 @@ const googleLogin = async ({ credential }) => {
       role: user.role,
       avatar_url: user.avatar_url,
       auth_provider: user.auth_provider,
+      google_sub: user.google_sub || googleSub,
     },
     token,
   };
