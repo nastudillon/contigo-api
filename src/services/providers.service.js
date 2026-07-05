@@ -2,6 +2,69 @@
 const providersRepo = require('../repositories/providers.repository');
 const bookingsRepo = require('../repositories/bookings.repository');
 const reviewsRepo = require('../repositories/reviews.repository');
+const usersRepo = require('../repositories/users.repository');
+
+function mapSpecialties(rows = []) {
+  const grouped = new Map();
+
+  for (const row of rows) {
+    if (!grouped.has(row.specialty_id)) {
+      grouped.set(row.specialty_id, {
+        id: row.specialty_id,
+        categoryId: row.category_id,
+        slug: row.specialty_slug,
+        name: row.specialty_label,
+        icon: row.specialty_icon || '',
+        active: row.is_active,
+        services: [],
+      });
+    }
+
+    if (row.service_id) {
+      grouped.get(row.specialty_id).services.push({
+        id: row.service_id,
+        name: row.service_name,
+        description: row.description,
+        price: row.price,
+      });
+    }
+  }
+
+  return [...grouped.values()];
+}
+
+const PERIOD_TIME_BY_KEY = {
+  manana: { startTime: '08:00:00', endTime: '13:00:00' },
+  tarde: { startTime: '14:00:00', endTime: '19:00:00' },
+  noche: { startTime: '19:00:00', endTime: '22:00:00' },
+};
+
+function inferPeriodKey(row = {}) {
+  if (row.period_key) return row.period_key;
+
+  const startTime = String(row.start_time || '');
+  if (startTime.startsWith('08:00')) return 'manana';
+  if (startTime.startsWith('14:00')) return 'tarde';
+  if (startTime.startsWith('19:00')) return 'noche';
+  return 'manana';
+}
+
+function mapAvailability(rows = []) {
+  return rows.map((row) => {
+    const periodKey = inferPeriodKey(row);
+    const defaults = PERIOD_TIME_BY_KEY[periodKey] || PERIOD_TIME_BY_KEY.manana;
+
+    return {
+      id: row.id,
+      dayOfWeek: row.day_of_week,
+      periodKey,
+      startTime: row.start_time || defaults.startTime,
+      endTime: row.end_time || defaults.endTime,
+      serviceMode: row.service_mode === 'consulta' ? 'consulta' : 'domicilio',
+      isAvailable: row.is_available !== false,
+    };
+  });
+}
 
 /**
  * Obtiene el listado de prestadores aprobados con filtros opcionales.
@@ -12,7 +75,7 @@ const getProviders = async (filters) => {
 
 /**
  * Obtiene el detalle completo de un prestador:
- * datos base + servicios + condiciones + últimas 10 reseñas
+ * datos base + servicios + certificaciones + últimas reseñas.
  */
 const getProviderById = async (id) => {
   const provider = await providersRepo.findById(id);
@@ -22,24 +85,24 @@ const getProviderById = async (id) => {
     throw err;
   }
 
-  // Queries paralelas para eficiencia
-  const [services, conditions, reviews] = await Promise.all([
+  const [serviceRows, conditions, reviews] = await Promise.all([
     providersRepo.findServicesByProviderId(id),
     providersRepo.findConditionsByProviderId(id),
     reviewsRepo.findByProviderId(id),
   ]);
 
-  return { ...provider, services, conditions, reviews };
+  const specialties = mapSpecialties(serviceRows);
+  const services = serviceRows
+    .filter(row => row.service_name)
+    .map(row => row.service_name);
+
+  return { ...provider, services, specialties, conditions, reviews };
 };
 
 /**
  * Calcula la disponibilidad horaria de un prestador en una fecha dada.
- * Retorna array de strings ["09:00", "10:00", ...]
- * @param {number} providerId
- * @param {string} date - Formato YYYY-MM-DD
  */
 const getAvailability = async (providerId, date) => {
-  // Verificar que el prestador existe
   const provider = await providersRepo.findById(providerId);
   if (!provider) {
     const err = new Error('Prestador no encontrado');
@@ -47,25 +110,14 @@ const getAvailability = async (providerId, date) => {
     throw err;
   }
 
-  // Calcular día de la semana: 0=Lunes, 6=Domingo
-  // Date.getDay() devuelve 0=Domingo, 1=Lunes ... 6=Sábado
-  // Convertimos: (getDay() + 6) % 7 → 0=Lunes, 6=Domingo
   const dateObj = new Date(date + 'T00:00:00');
   const dayOfWeek = (dateObj.getDay() + 6) % 7;
-
-  // Obtener slots configurados para ese día
   const slots = await providersRepo.findAvailabilitySlots(providerId, dayOfWeek);
 
   if (slots.length === 0) return [];
 
-  // Obtener horas ya ocupadas en esa fecha
   const bookedHours = await bookingsRepo.findBookedHoursOnDate(providerId, date);
-  // Normalizar a formato "HH:MM"
-  const bookedSet = new Set(
-    bookedHours.map((t) => t.substring(0, 5))
-  );
-
-  // Generar lista de horas disponibles por cada slot
+  const bookedSet = new Set(bookedHours.map((t) => t.substring(0, 5)));
   const availableHours = [];
 
   for (const slot of slots) {
@@ -80,22 +132,84 @@ const getAvailability = async (providerId, date) => {
     }
   }
 
-  // Ordenar y deduplicar
-  const unique = [...new Set(availableHours)].sort();
-  return unique;
+  return [...new Set(availableHours)].sort();
+};
+
+/**
+ * Devuelve (o crea si no existe) el perfil del prestador autenticado.
+ */
+const getMyProfile = async (userId) => {
+  let provider = await providersRepo.findByUserId(userId);
+
+  if (!provider) {
+    provider = await providersRepo.create({ userId });
+  }
+
+  const [conditions, user, serviceRows, availabilityRows, coverage] = await Promise.all([
+    providersRepo.findConditionsByProviderId(provider.id),
+    usersRepo.findById(userId),
+    providersRepo.findServicesByProviderId(provider.id),
+    providersRepo.findWeeklyAvailabilityByProviderId(provider.id),
+    providersRepo.findCoverageByProviderId(provider.id),
+  ]);
+
+  return {
+    ...provider,
+    name:                 user?.name,
+    phone:                user?.phone,
+    email:                user?.email,
+    rut:                  user?.rut,
+    consultation_address: provider?.consultation_address || '',
+    certifications:       conditions,
+    specialties:          mapSpecialties(serviceRows),
+    availability:         mapAvailability(availabilityRows),
+    coverage,
+  };
 };
 
 /**
  * Actualiza el perfil del prestador autenticado.
  */
 const updateMyProfile = async (userId, fields) => {
-  const updated = await providersRepo.updateByUserId(userId, fields);
-  if (!updated) {
-    const err = new Error('Perfil de prestador no encontrado');
-    err.statusCode = 404;
-    throw err;
+  let provider = await providersRepo.findByUserId(userId);
+
+  if (!provider) {
+    provider = await providersRepo.create({ userId });
   }
-  return updated;
+
+  const userFields = {};
+  if (fields.name !== undefined) userFields.name = fields.name;
+  if (fields.phone !== undefined) userFields.phone = fields.phone;
+  if (fields.rut !== undefined) userFields.rut = fields.rut;
+  if (Object.keys(userFields).length > 0) {
+    await usersRepo.updateFields(userId, userFields);
+  }
+
+  const providerFields = {};
+  ['bio', 'hourly_rate', 'experience_years', 'avatar_url', 'consultation_address'].forEach((key) => {
+    if (fields[key] !== undefined) providerFields[key] = fields[key];
+  });
+  if (Object.keys(providerFields).length > 0) {
+    await providersRepo.updateByUserId(userId, providerFields);
+  }
+
+  if (Array.isArray(fields.certificationIds)) {
+    await providersRepo.replaceConditions(provider.id, fields.certificationIds);
+  }
+
+  if (Array.isArray(fields.communeIds)) {
+    await providersRepo.replaceCoverage(provider.id, fields.communeIds);
+  }
+
+  if (Array.isArray(fields.specialties)) {
+    await providersRepo.replaceSpecialties(provider.id, fields.specialties);
+  }
+
+  if (Array.isArray(fields.availability)) {
+    await providersRepo.replaceAvailability(provider.id, fields.availability);
+  }
+
+  return getMyProfile(userId);
 };
 
 /**
@@ -111,10 +225,19 @@ const getMyBookings = async (userId) => {
   return bookingsRepo.findByProviderId(provider.id);
 };
 
+/**
+ * Devuelve el catálogo completo de certificaciones.
+ */
+const getCertifications = async () => {
+  return providersRepo.findAllCertifications();
+};
+
 module.exports = {
   getProviders,
   getProviderById,
   getAvailability,
+  getMyProfile,
   updateMyProfile,
   getMyBookings,
+  getCertifications,
 };

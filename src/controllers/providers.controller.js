@@ -18,7 +18,6 @@ const getProviders = async (req, res, next) => {
 
 /**
  * GET /api/v1/providers/me/bookings
- * Reservas del prestador autenticado (debe ir ANTES de /:id para no colisionar)
  */
 const getMyBookings = async (req, res, next) => {
   try {
@@ -31,7 +30,6 @@ const getMyBookings = async (req, res, next) => {
 
 /**
  * GET /api/v1/providers/:id
- * Detalle público de un prestador: datos + servicios + condiciones + reseñas
  */
 const getProviderById = async (req, res, next) => {
   try {
@@ -44,7 +42,6 @@ const getProviderById = async (req, res, next) => {
 
 /**
  * GET /api/v1/providers/:id/availability?date=YYYY-MM-DD
- * Disponibilidad horaria de un prestador en una fecha
  */
 const getAvailability = async (req, res, next) => {
   try {
@@ -63,20 +60,47 @@ const getAvailability = async (req, res, next) => {
 };
 
 /**
+ * GET /api/v1/providers/me
+ */
+const getMyProfile = async (req, res, next) => {
+  try {
+    const profile = await providersService.getMyProfile(req.user.id);
+    return successResponse(res, 'Perfil obtenido exitosamente', { provider: profile });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
  * PUT /api/v1/providers/me
- * Actualiza el perfil del prestador autenticado
+ * Acepta también specialties, consultation_address y availability para guardar
+ * servicios, dirección de consulta y horarios semanales del prestador.
  */
 const updateMyProfile = async (req, res, next) => {
   try {
-    const { bio, hourly_rate, experience_years, location, avatar_url } = req.body;
+    const {
+      name, phone, rut, bio, hourly_rate,
+      experience_years, avatar_url, consultation_address,
+      certificationIds, communeIds, specialties, availability,
+    } = req.body;
     const updated = await providersService.updateMyProfile(req.user.id, {
-      bio,
-      hourly_rate,
-      experience_years,
-      location,
-      avatar_url,
+      name, phone, rut, bio, hourly_rate,
+      experience_years, avatar_url, consultation_address,
+      certificationIds, communeIds, specialties, availability,
     });
     return successResponse(res, 'Perfil actualizado exitosamente', { provider: updated });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * GET /api/v1/certifications
+ */
+const getCertifications = async (req, res, next) => {
+  try {
+    const certifications = await providersService.getCertifications();
+    return successResponse(res, 'Certificaciones obtenidas exitosamente', { certifications });
   } catch (err) {
     next(err);
   }
@@ -86,6 +110,8 @@ module.exports = {
   getProviders,
   getProviderById,
   getAvailability,
+  getMyProfile,
   updateMyProfile,
   getMyBookings,
+  getCertifications,
 };

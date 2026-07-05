@@ -6,6 +6,7 @@ const USER_PUBLIC_SELECT = `
   name,
   email,
   phone,
+  rut,
   role,
   is_active,
   COALESCE(auth_provider, CASE WHEN google_sub IS NOT NULL THEN 'google' ELSE 'local' END) AS auth_provider,
@@ -129,6 +130,29 @@ const createElderlyContact = async ({ userId, contactName, contactPhone, relatio
 };
 
 /**
+ * Actualiza campos editables del usuario (name, phone, rut)
+ */
+const updateFields = async (userId, { name, phone, rut } = {}) => {
+  const setClauses = [];
+  const params = [];
+  let idx = 1;
+
+  if (name  !== undefined) { setClauses.push(`name  = $${idx++}`); params.push(name); }
+  if (phone !== undefined) { setClauses.push(`phone = $${idx++}`); params.push(phone); }
+  if (rut   !== undefined) { setClauses.push(`rut   = $${idx++}`); params.push(rut); }
+
+  if (setClauses.length === 0) return;
+
+  setClauses.push(`updated_at = NOW()`);
+  params.push(userId);
+
+  await pool.query(
+    `UPDATE users SET ${setClauses.join(', ')} WHERE id = $${idx}`,
+    params
+  );
+};
+
+/**
  * Cuenta el total de usuarios
  */
 const countAll = async () => {
@@ -145,5 +169,6 @@ module.exports = {
   linkGoogleAccount,
   completeOnboarding,
   createElderlyContact,
+  updateFields,
   countAll,
 };

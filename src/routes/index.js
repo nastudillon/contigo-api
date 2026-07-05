@@ -26,6 +26,13 @@ router.patch('/auth/complete-profile', authMiddleware, authController.completePr
 // ──────────────────────────────────────────────
 
 // Rutas autenticadas del prestador (antes de /:id)
+router.get(
+  '/providers/me',
+  authMiddleware,
+  roleMiddleware(['prestador']),
+  providersController.getMyProfile
+);
+
 router.put(
   '/providers/me',
   authMiddleware,
@@ -39,6 +46,9 @@ router.get(
   roleMiddleware(['prestador']),
   providersController.getMyBookings
 );
+
+// Catálogo de certificaciones (público)
+router.get('/certifications', providersController.getCertifications);
 
 // Rutas públicas de providers
 router.get('/providers', providersController.getProviders);
