@@ -7,6 +7,44 @@ const { generateToken } = require('../utils/jwt');
 const config = require('../config/env');
 
 const googleClient = new OAuth2Client(config.googleClientId);
+const ALLOWED_PROFILE_TYPES = new Set(['adulto_mayor', 'familiar', 'prestador']);
+
+function serializeUser(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone || null,
+    role: user.role ?? null,
+    avatar_url: user.avatar_url || null,
+    avatarUrl: user.avatar_url || null,
+    auth_provider: user.auth_provider,
+    authProvider: user.auth_provider,
+    google_sub: user.google_sub || null,
+    googleSub: user.google_sub || null,
+    status: user.status,
+    profile_completed: Boolean(user.profile_completed),
+    profileCompleted: Boolean(user.profile_completed),
+    is_active: user.is_active,
+    isActive: user.is_active,
+  };
+}
+
+function buildAuthResult(user) {
+  const serializedUser = serializeUser(user);
+  const token = generateToken({
+    id: serializedUser.id,
+    name: serializedUser.name,
+    email: serializedUser.email,
+    role: serializedUser.role,
+  });
+
+  return {
+    user: serializedUser,
+    token,
+    requiresOnboarding: !serializedUser.profileCompleted,
+  };
+}
 
 /**
  * Registra un nuevo usuario.
@@ -58,14 +96,7 @@ const register = async ({
     });
   }
 
-  const token = generateToken({
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-  });
-
-  return { user, token };
+  return buildAuthResult(user);
 };
 
 /**
@@ -98,16 +129,8 @@ const login = async ({ email, password }) => {
     throw err;
   }
 
-  const { password_hash, ...user } = userWithHash;
-
-  const token = generateToken({
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-  });
-
-  return { user, token };
+  const user = await usersRepo.findById(userWithHash.id);
+  return buildAuthResult(user);
 };
 
 /**
@@ -120,13 +143,12 @@ const getMe = async (userId) => {
     err.statusCode = 404;
     throw err;
   }
-  return user;
+  return serializeUser(user);
 };
 
 /**
  * Login o registro con Google.
- * Valida el ID token contra Google, crea o vincula usuario en PostgreSQL
- * y devuelve JWT interno del sistema.
+ * Si es primera vez, crea una cuenta mínima y deja el perfil en onboarding.
  */
 const googleLogin = async ({ credential }) => {
   if (!config.googleClientId) {
@@ -175,7 +197,7 @@ const googleLogin = async ({ credential }) => {
         email,
         avatarUrl: picture,
         googleSub,
-        role: 'familiar',
+        role: null,
       });
     }
   }
@@ -186,25 +208,49 @@ const googleLogin = async ({ credential }) => {
     throw err;
   }
 
-  const token = generateToken({
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role: user.role,
-  });
-
-  return {
-    user: {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      avatar_url: user.avatar_url,
-      auth_provider: user.auth_provider,
-      google_sub: user.google_sub || googleSub,
-    },
-    token,
-  };
+  return buildAuthResult(user);
 };
 
-module.exports = { register, login, googleLogin, getMe };
+/**
+ * Completa el onboarding posterior al login con Google.
+ */
+const completeProfile = async ({ userId, profileType }) => {
+  if (!ALLOWED_PROFILE_TYPES.has(profileType)) {
+    const err = new Error('Tipo de perfil inválido');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const currentUser = await usersRepo.findById(userId);
+  if (!currentUser) {
+    const err = new Error('Usuario no encontrado');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  let user = currentUser;
+
+  if (!currentUser.profile_completed || currentUser.role !== profileType) {
+    user = await usersRepo.completeOnboarding({
+      userId,
+      role: profileType,
+      status: 'ACTIVE',
+    });
+  }
+
+  if (profileType === 'prestador') {
+    const providerProfile = await providersRepo.findByUserId(userId);
+    if (!providerProfile) {
+      await providersRepo.create({
+        userId,
+        categoryId: null,
+        regionId: null,
+        location: null,
+      });
+    }
+  }
+
+  return buildAuthResult(user);
+};
+
+module.exports = { register, login, googleLogin, getMe, completeProfile };

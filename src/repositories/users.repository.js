@@ -1,6 +1,22 @@
 // Repositorio de usuarios: acceso directo a la tabla users (y elderly_contacts)
 const pool = require('../db/pool');
 
+const USER_PUBLIC_SELECT = `
+  id,
+  name,
+  email,
+  phone,
+  role,
+  is_active,
+  COALESCE(auth_provider, CASE WHEN google_sub IS NOT NULL THEN 'google' ELSE 'local' END) AS auth_provider,
+  avatar_url,
+  google_sub,
+  COALESCE(status, CASE WHEN role IS NULL THEN 'ONBOARDING' ELSE 'ACTIVE' END) AS status,
+  COALESCE(profile_completed, role IS NOT NULL) AS profile_completed,
+  created_at,
+  updated_at
+`;
+
 /**
  * Busca un usuario por email (incluye password_hash para verificación)
  */
@@ -17,7 +33,7 @@ const findByEmail = async (email) => {
  */
 const findById = async (id) => {
   const { rows } = await pool.query(
-    `SELECT id, name, email, phone, role, is_active, auth_provider, avatar_url, created_at, updated_at
+    `SELECT ${USER_PUBLIC_SELECT}
      FROM users WHERE id = $1`,
     [id]
   );
@@ -29,7 +45,7 @@ const findById = async (id) => {
  */
 const findByGoogleSub = async (googleSub) => {
   const { rows } = await pool.query(
-    `SELECT id, name, email, phone, role, is_active, auth_provider, avatar_url, google_sub, created_at, updated_at
+    `SELECT ${USER_PUBLIC_SELECT}
      FROM users WHERE google_sub = $1`,
     [googleSub]
   );
@@ -37,30 +53,31 @@ const findByGoogleSub = async (googleSub) => {
 };
 
 /**
- * Crea un nuevo usuario con contraseña local
- * @returns {object} Usuario creado (sin password_hash)
+ * Crea un nuevo usuario con contraseña local.
+ * Los registros tradicionales nacen activos y con perfil completo.
  */
 const create = async ({ name, email, phone, passwordHash, role }) => {
   const { rows } = await pool.query(
-    `INSERT INTO users (name, email, phone, password_hash, role, auth_provider, is_active, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, 'local', true, NOW(), NOW())
-     RETURNING id, name, email, phone, role, auth_provider, avatar_url, is_active, created_at, updated_at`,
+    `INSERT INTO users (name, email, phone, password_hash, role, auth_provider, is_active, status, profile_completed, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, 'local', true, 'ACTIVE', true, NOW(), NOW())
+     RETURNING id`,
     [name, email, phone || null, passwordHash, role]
   );
-  return rows[0];
+  return findById(rows[0].id);
 };
 
 /**
- * Crea un usuario registrado vía Google (sin contraseña local)
+ * Crea un usuario registrado vía Google (sin contraseña local).
+ * Se guarda en estado ONBOARDING hasta que elija su tipo de perfil.
  */
-const createFromGoogle = async ({ name, email, avatarUrl, googleSub, role }) => {
+const createFromGoogle = async ({ name, email, avatarUrl, googleSub, role = null }) => {
   const { rows } = await pool.query(
-    `INSERT INTO users (name, email, avatar_url, google_sub, role, auth_provider, is_active, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, 'google', true, NOW(), NOW())
-     RETURNING id, name, email, phone, role, auth_provider, avatar_url, is_active, created_at, updated_at`,
+    `INSERT INTO users (name, email, avatar_url, google_sub, role, auth_provider, is_active, status, profile_completed, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, 'google', true, 'ONBOARDING', false, NOW(), NOW())
+     RETURNING id`,
     [name, email, avatarUrl || null, googleSub, role]
   );
-  return rows[0];
+  return findById(rows[0].id);
 };
 
 /**
@@ -75,10 +92,27 @@ const linkGoogleAccount = async (userId, googleSub, avatarUrl) => {
          avatar_url = COALESCE(avatar_url, $2),
          updated_at = NOW()
      WHERE id = $3
-     RETURNING id, name, email, phone, role, auth_provider, avatar_url, is_active, created_at, updated_at`,
+     RETURNING id`,
     [googleSub, avatarUrl || null, userId]
   );
-  return rows[0];
+  return rows[0] ? findById(rows[0].id) : null;
+};
+
+/**
+ * Completa el onboarding del usuario con el rol elegido.
+ */
+const completeOnboarding = async ({ userId, role, status = 'ACTIVE' }) => {
+  const { rows } = await pool.query(
+    `UPDATE users
+     SET role = $1,
+         status = $2,
+         profile_completed = true,
+         updated_at = NOW()
+     WHERE id = $3
+     RETURNING id`,
+    [role, status, userId]
+  );
+  return rows[0] ? findById(rows[0].id) : null;
 };
 
 /**
@@ -109,6 +143,7 @@ module.exports = {
   create,
   createFromGoogle,
   linkGoogleAccount,
+  completeOnboarding,
   createElderlyContact,
   countAll,
 };

@@ -100,4 +100,27 @@ const googleLogin = async (req, res, next) => {
   }
 };
 
-module.exports = { register, login, googleLogin, getMe };
+/**
+ * PATCH /api/v1/auth/complete-profile
+ * Completa el onboarding del usuario autenticado.
+ */
+const completeProfile = async (req, res, next) => {
+  try {
+    const { profileType } = req.body;
+
+    if (!profileType) {
+      return res.status(400).json({ success: false, message: 'Campo requerido: profileType' });
+    }
+
+    const result = await authService.completeProfile({
+      userId: req.user.id,
+      profileType,
+    });
+
+    return successResponse(res, 'Perfil completado exitosamente', result);
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { register, login, googleLogin, getMe, completeProfile };

@@ -17,6 +17,7 @@ router.post('/auth/register', authController.register);
 router.post('/auth/login', authController.login);
 router.post('/auth/google', authController.googleLogin);
 router.get('/auth/me', authMiddleware, authController.getMe);
+router.patch('/auth/complete-profile', authMiddleware, authController.completeProfile);
 
 // ──────────────────────────────────────────────
 // PROVIDERS
