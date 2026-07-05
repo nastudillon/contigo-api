@@ -66,11 +66,54 @@ function mapAvailability(rows = []) {
   });
 }
 
+const DAY_LABELS = ['lunes', 'martes', 'miercoles', 'jueves', 'viernes', 'sabado', 'domingo'];
+
+function summarizeNextAvailability(rows = []) {
+  const slots = mapAvailability(rows).filter((slot) => slot.isAvailable !== false);
+  if (slots.length === 0) return null;
+
+  const today = new Date();
+  const todayIndex = (today.getDay() + 6) % 7;
+
+  const nextDays = [...new Set(slots.map((slot) => slot.dayOfWeek))].sort((a, b) => a - b);
+
+  if (nextDays.includes(todayIndex)) return 'hoy';
+  if (nextDays.includes((todayIndex + 1) % 7)) return 'mañana';
+
+  let bestDay = nextDays[0];
+  let bestDistance = 7;
+
+  for (const dayIndex of nextDays) {
+    const distance = (dayIndex - todayIndex + 7) % 7;
+    if (distance > 0 && distance < bestDistance) {
+      bestDistance = distance;
+      bestDay = dayIndex;
+    }
+  }
+
+  return DAY_LABELS[bestDay] || null;
+}
+
 /**
  * Obtiene el listado de prestadores aprobados con filtros opcionales.
  */
 const getProviders = async (filters) => {
-  return providersRepo.findAll(filters);
+  const providers = await providersRepo.findAll(filters);
+
+  return Promise.all(
+    providers.map(async (provider) => {
+      const [conditions, availabilityRows] = await Promise.all([
+        providersRepo.findConditionsByProviderId(provider.id),
+        providersRepo.findWeeklyAvailabilityByProviderId(provider.id),
+      ]);
+
+      return {
+        ...provider,
+        conditions,
+        avail: summarizeNextAvailability(availabilityRows),
+      };
+    })
+  );
 };
 
 /**
@@ -203,6 +246,11 @@ const updateMyProfile = async (userId, fields) => {
 
   if (Array.isArray(fields.specialties)) {
     await providersRepo.replaceSpecialties(provider.id, fields.specialties);
+
+    const hasAnySpecialty = fields.specialties.some((specialty) => Number.isInteger(Number(specialty?.categoryId)));
+    if (hasAnySpecialty) {
+      await providersRepo.autoApproveById(provider.id);
+    }
   }
 
   if (Array.isArray(fields.availability)) {

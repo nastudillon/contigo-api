@@ -7,6 +7,8 @@ const authController = require('../controllers/auth.controller');
 const providersController = require('../controllers/providers.controller');
 const bookingsController = require('../controllers/bookings.controller');
 const adminController = require('../controllers/admin.controller');
+const uploadsController = require('../controllers/uploads.controller');
+const elderlyController = require('../controllers/elderly.controller');
 
 const router = Router();
 
@@ -18,6 +20,8 @@ router.post('/auth/login', authController.login);
 router.post('/auth/google', authController.googleLogin);
 router.get('/auth/me', authMiddleware, authController.getMe);
 router.patch('/auth/complete-profile', authMiddleware, authController.completeProfile);
+
+router.post('/uploads/avatar', authMiddleware, uploadsController.uploadAvatar);
 
 // ──────────────────────────────────────────────
 // PROVIDERS
@@ -54,6 +58,25 @@ router.get('/certifications', providersController.getCertifications);
 router.get('/providers', providersController.getProviders);
 router.get('/providers/:id', providersController.getProviderById);
 router.get('/providers/:id/availability', providersController.getAvailability);
+
+// ──────────────────────────────────────────────
+// USERS (perfil editable)
+// ──────────────────────────────────────────────
+router.patch('/users/me', authMiddleware, async (req, res, next) => {
+  try {
+    const usersRepo = require('../repositories/users.repository');
+    const { name, phone, relation } = req.body;
+    await usersRepo.updateFields(req.user.id, { name, phone, relation });
+    const user = await usersRepo.findById(req.user.id);
+    return require('../utils/responses').successResponse(res, 'Perfil actualizado', user);
+  } catch (err) { next(err); }
+});
+
+// ──────────────────────────────────────────────
+// ELDERLY (adultos mayores del familiar)
+// ──────────────────────────────────────────────
+router.get('/elderly', authMiddleware, elderlyController.list);
+router.put('/elderly', authMiddleware, elderlyController.saveAll);
 
 // ──────────────────────────────────────────────
 // BOOKINGS

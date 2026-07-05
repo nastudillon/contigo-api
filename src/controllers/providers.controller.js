@@ -8,8 +8,8 @@ const { successResponse } = require('../utils/responses');
  */
 const getProviders = async (req, res, next) => {
   try {
-    const { category, location, search } = req.query;
-    const providers = await providersService.getProviders({ category, location, search });
+    const { category, location, search, sort } = req.query;
+    const providers = await providersService.getProviders({ category, location, search, sort });
     return successResponse(res, 'Prestadores obtenidos exitosamente', { providers });
   } catch (err) {
     next(err);

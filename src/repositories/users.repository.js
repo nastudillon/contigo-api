@@ -7,6 +7,7 @@ const USER_PUBLIC_SELECT = `
   email,
   phone,
   rut,
+  relation,
   role,
   is_active,
   COALESCE(auth_provider, CASE WHEN google_sub IS NOT NULL THEN 'google' ELSE 'local' END) AS auth_provider,
@@ -132,14 +133,27 @@ const createElderlyContact = async ({ userId, contactName, contactPhone, relatio
 /**
  * Actualiza campos editables del usuario (name, phone, rut)
  */
-const updateFields = async (userId, { name, phone, rut } = {}) => {
+const updateAvatarUrl = async (userId, avatarUrl) => {
+  const { rows } = await pool.query(
+    `UPDATE users
+     SET avatar_url = $1,
+         updated_at = NOW()
+     WHERE id = $2
+     RETURNING id`,
+    [avatarUrl || null, userId]
+  );
+  return rows[0] ? findById(rows[0].id) : null;
+};
+
+const updateFields = async (userId, { name, phone, rut, relation } = {}) => {
   const setClauses = [];
   const params = [];
   let idx = 1;
 
-  if (name  !== undefined) { setClauses.push(`name  = $${idx++}`); params.push(name); }
-  if (phone !== undefined) { setClauses.push(`phone = $${idx++}`); params.push(phone); }
-  if (rut   !== undefined) { setClauses.push(`rut   = $${idx++}`); params.push(rut); }
+  if (name     !== undefined) { setClauses.push(`name     = $${idx++}`); params.push(name); }
+  if (phone    !== undefined) { setClauses.push(`phone    = $${idx++}`); params.push(phone); }
+  if (rut      !== undefined) { setClauses.push(`rut      = $${idx++}`); params.push(rut); }
+  if (relation !== undefined) { setClauses.push(`relation = $${idx++}`); params.push(relation); }
 
   if (setClauses.length === 0) return;
 
@@ -170,5 +184,6 @@ module.exports = {
   completeOnboarding,
   createElderlyContact,
   updateFields,
+  updateAvatarUrl,
   countAll,
 };

@@ -1,11 +1,13 @@
 {
   "name": "contigo-api",
   "version": "1.0.0",
-  "description": "API principal del proyecto ContigoCerca - lógica de negocio, auth, providers, bookings",
+  "description": "API principal del proyecto ContigoCerca - l\u00f3gica de negocio, auth, providers, bookings",
   "main": "src/server.js",
   "scripts": {
     "dev": "nodemon src/server.js",
-    "start": "node src/server.js"
+    "start": "node src/server.js",
+    "seed:demo-providers": "node scripts/seed-demo-providers.js",
+    "upload:provider-images": "node scripts/upload-provider-images.js"
   },
   "keywords": [
     "api",

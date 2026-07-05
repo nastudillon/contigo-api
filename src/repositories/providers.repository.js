@@ -26,16 +26,34 @@ const getAvailabilitySlotsColumns = async () => {
  * Obtiene todos los prestadores aprobados con filtros opcionales
  * @param {object} filters - { category, location, search }
  */
-const findAll = async ({ category, location, search } = {}) => {
+const findAll = async ({ category, location, search, sort } = {}) => {
   const conditions = [
     "p.validation_status = 'approved'",
     'p.is_verified = true',
+    `(
+      p.category_id IS NOT NULL OR EXISTS (
+        SELECT 1
+        FROM provider_specialties ps_visible
+        WHERE ps_visible.provider_id = p.id
+          AND ps_visible.is_active = true
+      )
+    )`,
   ];
   const params = [];
   let paramIndex = 1;
 
   if (category) {
-    conditions.push(`c.slug = $${paramIndex}`);
+    conditions.push(`(
+      c.slug = $${paramIndex}
+      OR EXISTS (
+        SELECT 1
+        FROM provider_specialties ps_filter
+        JOIN categories c_filter ON c_filter.id = ps_filter.category_id
+        WHERE ps_filter.provider_id = p.id
+          AND ps_filter.is_active = true
+          AND c_filter.slug = $${paramIndex}
+      )
+    )`);
     params.push(category);
     paramIndex++;
   }
@@ -47,12 +65,45 @@ const findAll = async ({ category, location, search } = {}) => {
   }
 
   if (search) {
-    conditions.push(`(u.name ILIKE $${paramIndex} OR p.bio ILIKE $${paramIndex})`);
+    conditions.push(`(
+      u.name ILIKE $${paramIndex}
+      OR p.bio ILIKE $${paramIndex}
+      OR c.label ILIKE $${paramIndex}
+      OR p.location ILIKE $${paramIndex}
+      OR EXISTS (
+        SELECT 1
+        FROM provider_specialties ps_search
+        JOIN categories c_search ON c_search.id = ps_search.category_id
+        WHERE ps_search.provider_id = p.id
+          AND ps_search.is_active = true
+          AND (
+            c_search.label ILIKE $${paramIndex}
+            OR c_search.slug ILIKE $${paramIndex}
+          )
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM provider_specialties ps_service
+        JOIN provider_services s_search ON s_search.provider_specialty_id = ps_service.id
+        WHERE ps_service.provider_id = p.id
+          AND ps_service.is_active = true
+          AND (
+            COALESCE(s_search.name, '') ILIKE $${paramIndex}
+            OR COALESCE(s_search.description, '') ILIKE $${paramIndex}
+          )
+      )
+    )`);
     params.push(`%${search}%`);
     paramIndex++;
   }
 
   const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+
+  const orderByClause = {
+    rating_desc: 'p.rating_avg DESC, p.review_count DESC, u.name ASC',
+    price_asc: 'p.hourly_rate ASC NULLS LAST, p.rating_avg DESC, u.name ASC',
+    experience_desc: 'p.experience_years DESC NULLS LAST, p.rating_avg DESC, u.name ASC',
+  }[sort] || 'p.is_featured DESC, p.rating_avg DESC, p.review_count DESC, u.name ASC';
 
   const query = `
     SELECT p.*,
@@ -65,7 +116,7 @@ const findAll = async ({ category, location, search } = {}) => {
     LEFT JOIN categories c ON p.category_id = c.id
     LEFT JOIN regions r ON p.region_id = r.id
     ${whereClause}
-    ORDER BY p.is_featured DESC, p.rating_avg DESC
+    ORDER BY ${orderByClause}
   `;
 
   const { rows } = await pool.query(query, params);
@@ -163,6 +214,23 @@ const updateValidationStatus = async (id, action) => {
      WHERE id = $3
      RETURNING *`,
     [validationStatus, isVerified, id]
+  );
+  return rows[0] || null;
+};
+
+
+/**
+ * Aprueba automaticamente un prestador para el flujo de desarrollo/demo.
+ */
+const autoApproveById = async (id) => {
+  const { rows } = await pool.query(
+    `UPDATE providers
+     SET validation_status = 'approved',
+         is_verified = true,
+         updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [id]
   );
   return rows[0] || null;
 };
@@ -527,6 +595,7 @@ module.exports = {
   create,
   updateByUserId,
   updateValidationStatus,
+  autoApproveById,
   findServicesByProviderId,
   findConditionsByProviderId,
   replaceConditions,

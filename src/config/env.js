@@ -1,6 +1,14 @@
 // Configuración de variables de entorno
 require('dotenv').config();
 
+function parseCloudinaryUrl(value = '') {
+  const match = String(value).match(/^cloudinary:\/\/([^:]+):([^@]+)@(.+)$/);
+  if (!match) return {};
+  return { apiKey: match[1], apiSecret: match[2], cloudName: match[3] };
+}
+
+const cloudinaryFromUrl = parseCloudinaryUrl(process.env.CLOUDINARY_URL || process.env.CLOUDINARY_API_ENV_VARIABLE || '');
+
 const config = {
   port: parseInt(process.env.PORT, 10) || 3001,
   nodeEnv: process.env.NODE_ENV || 'development',
@@ -12,6 +20,13 @@ const config = {
   corsOrigin: process.env.CORS_ORIGIN || 'http://localhost:8000',
   // Google OAuth — obligatorio en producción
   googleClientId: process.env.GOOGLE_CLIENT_ID || '',
+  cloudinary: {
+    cloudName: process.env.CLOUDINARY_CLOUD_NAME || cloudinaryFromUrl.cloudName || '',
+    apiKey: process.env.CLOUDINARY_API_KEY || cloudinaryFromUrl.apiKey || '',
+    apiSecret: process.env.CLOUDINARY_API_SECRET || cloudinaryFromUrl.apiSecret || '',
+    url: process.env.CLOUDINARY_URL || process.env.CLOUDINARY_API_ENV_VARIABLE || '',
+    folderRoot: process.env.CLOUDINARY_FOLDER_ROOT || 'contigocerca',
+  },
 };
 
 module.exports = config;
