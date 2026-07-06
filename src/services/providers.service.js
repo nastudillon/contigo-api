@@ -142,18 +142,21 @@ const getProviderById = async (id) => {
     throw err;
   }
 
-  const [serviceRows, conditions, reviews] = await Promise.all([
+  const [serviceRows, conditions, reviews, availabilityRows, coverage] = await Promise.all([
     providersRepo.findServicesByProviderId(id),
     providersRepo.findConditionsByProviderId(id),
     reviewsRepo.findByProviderId(id),
+    providersRepo.findWeeklyAvailabilityByProviderId(id),
+    providersRepo.findCoverageByProviderId(id),
   ]);
 
   const specialties = mapSpecialties(serviceRows);
   const services = serviceRows
     .filter(row => row.service_name)
     .map(row => row.service_name);
+  const availability = mapAvailability(availabilityRows);
 
-  return { ...provider, services, specialties, conditions, reviews };
+  return { ...provider, services, specialties, conditions, reviews, availability, coverage };
 };
 
 /**

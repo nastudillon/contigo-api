@@ -84,6 +84,8 @@ router.put('/elderly', authMiddleware, elderlyController.saveAll);
 router.get('/bookings/me', authMiddleware, bookingsController.getMyBookings);
 router.post('/bookings', authMiddleware, bookingsController.createBooking);
 router.patch('/bookings/:id/cancel', authMiddleware, bookingsController.cancelBooking);
+router.patch('/bookings/:id/confirm', authMiddleware, roleMiddleware(['prestador']), bookingsController.confirmBooking);
+router.patch('/bookings/:id/complete', authMiddleware, roleMiddleware(['prestador']), bookingsController.completeBooking);
 
 // ──────────────────────────────────────────────
 // ADMIN

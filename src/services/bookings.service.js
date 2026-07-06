@@ -14,15 +14,21 @@ const getMyBookings = async (clientId) => {
  * @param {object} body - { provider_id, date, time, duration_hours, notes, total_price }
  */
 const createBooking = async (clientId, { provider_id, date, time, duration_hours, notes, total_price }) => {
-  // Validaciones básicas
-  if (!provider_id || !date || !time || !duration_hours || !total_price) {
+  if (!provider_id || !date || !time || !duration_hours || total_price === undefined || total_price === null) {
     const err = new Error('Faltan campos requeridos: provider_id, date, time, duration_hours, total_price');
     err.statusCode = 400;
     throw err;
   }
 
-  if (duration_hours < 1 || duration_hours > 4) {
-    const err = new Error('La duración debe ser entre 1 y 4 horas');
+  if (Number(duration_hours) !== 1) {
+    const err = new Error('Por ahora las reservas deben ser de 1 hora exacta.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const cleanNotes = typeof notes === 'string' ? notes.trim() : '';
+  if (cleanNotes.length > 200) {
+    const err = new Error('Las notas adicionales no pueden superar 200 caracteres.');
     err.statusCode = 400;
     throw err;
   }
@@ -32,9 +38,9 @@ const createBooking = async (clientId, { provider_id, date, time, duration_hours
     providerId: provider_id,
     date,
     time,
-    durationHours: duration_hours,
+    durationHours: 1,
     totalPrice: total_price,
-    notes,
+    notes: cleanNotes,
   });
 
   return booking;
@@ -77,4 +83,73 @@ const cancelBooking = async (bookingId, user) => {
   return bookingsRepo.cancel(bookingId, user.id);
 };
 
-module.exports = { getMyBookings, createBooking, cancelBooking };
+/**
+ * Confirma una reserva.
+ * Solo puede confirmar el prestador al que pertenece la reserva.
+ * @param {number} bookingId
+ * @param {object} user - { id, role } del usuario autenticado
+ */
+const confirmBooking = async (bookingId, user) => {
+  const booking = await bookingsRepo.findById(bookingId);
+
+  if (!booking) {
+    const err = new Error('Reserva no encontrada');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  if (booking.status !== 'pending') {
+    const err = new Error('Solo se pueden confirmar reservas en estado pendiente');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Verificar que el prestador autenticado es dueño de la reserva
+  const providersRepo = require('../repositories/providers.repository');
+  const provider = await providersRepo.findByUserId(user.id);
+  if (!provider || provider.id !== booking.provider_id) {
+    const err = new Error('No tienes permiso para confirmar esta reserva');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  return bookingsRepo.confirm(bookingId);
+};
+
+/**
+ * Marca una reserva como completada.
+ * Solo puede hacerlo el prestador dueño de la reserva.
+ */
+const completeBooking = async (bookingId, user) => {
+  const booking = await bookingsRepo.findById(bookingId);
+
+  if (!booking) {
+    const err = new Error('Reserva no encontrada');
+    err.statusCode = 404;
+    throw err;
+  }
+
+  if (booking.status === 'cancelled') {
+    const err = new Error('No se puede completar una reserva cancelada');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  if (booking.status === 'completed') {
+    const err = new Error('La reserva ya está completada');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  const providersRepo = require('../repositories/providers.repository');
+  const provider = await providersRepo.findByUserId(user.id);
+  if (!provider || provider.id !== booking.provider_id) {
+    const err = new Error('No tienes permiso para completar esta reserva');
+    err.statusCode = 403;
+    throw err;
+  }
+
+  return bookingsRepo.complete(bookingId);
+};
+
+module.exports = { getMyBookings, createBooking, cancelBooking, confirmBooking, completeBooking };

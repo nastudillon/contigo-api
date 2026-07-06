@@ -55,13 +55,22 @@ const findById = async (id) => {
  * Crea una nueva reserva
  */
 const create = async ({ clientId, providerId, date, time, durationHours, totalPrice, notes }) => {
-  const { rows } = await pool.query(
-    `INSERT INTO bookings (client_id, provider_id, date, time, duration_hours, total_price, notes, status, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW(), NOW())
-     RETURNING *`,
-    [clientId, providerId, date, time, durationHours, totalPrice, notes || null]
-  );
-  return rows[0];
+  try {
+    const { rows } = await pool.query(
+      `INSERT INTO bookings (client_id, provider_id, date, time, duration_hours, total_price, notes, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW(), NOW())
+       RETURNING *`,
+      [clientId, providerId, date, time, durationHours, totalPrice, notes || null]
+    );
+    return rows[0];
+  } catch (error) {
+    if (error.code === '23505') {
+      const err = new Error('Ese horario ya fue reservado. Elige otro disponible.');
+      err.statusCode = 409;
+      throw err;
+    }
+    throw error;
+  }
 };
 
 /**
@@ -74,6 +83,34 @@ const cancel = async (id, cancelledBy) => {
      WHERE id = $2
      RETURNING *`,
     [cancelledBy, id]
+  );
+  return rows[0] || null;
+};
+
+/**
+ * Confirma una reserva (cambia status a confirmed)
+ */
+const confirm = async (id) => {
+  const { rows } = await pool.query(
+    `UPDATE bookings
+     SET status = 'confirmed', updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [id]
+  );
+  return rows[0] || null;
+};
+
+/**
+ * Marca una reserva como completada
+ */
+const complete = async (id) => {
+  const { rows } = await pool.query(
+    `UPDATE bookings
+     SET status = 'completed', updated_at = NOW()
+     WHERE id = $1
+     RETURNING *`,
+    [id]
   );
   return rows[0] || null;
 };
@@ -130,6 +167,8 @@ module.exports = {
   findByProviderId,
   findById,
   create,
+  confirm,
+  complete,
   cancel,
   findBookedHoursOnDate,
   findAllForAdmin,

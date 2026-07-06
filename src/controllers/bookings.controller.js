@@ -41,4 +41,30 @@ const cancelBooking = async (req, res, next) => {
   }
 };
 
-module.exports = { getMyBookings, createBooking, cancelBooking };
+/**
+ * PATCH /api/v1/bookings/:id/confirm
+ * Confirma una reserva pendiente (solo el prestador dueño)
+ */
+const confirmBooking = async (req, res, next) => {
+  try {
+    const booking = await bookingsService.confirmBooking(req.params.id, req.user);
+    return successResponse(res, 'Reserva confirmada exitosamente', { booking });
+  } catch (err) {
+    next(err);
+  }
+};
+
+/**
+ * PATCH /api/v1/bookings/:id/complete
+ * Marca una reserva como completada (solo el prestador dueño)
+ */
+const completeBooking = async (req, res, next) => {
+  try {
+    const booking = await bookingsService.completeBooking(req.params.id, req.user);
+    return successResponse(res, 'Reserva completada exitosamente', { booking });
+  } catch (err) {
+    next(err);
+  }
+};
+
+module.exports = { getMyBookings, createBooking, cancelBooking, confirmBooking, completeBooking };
