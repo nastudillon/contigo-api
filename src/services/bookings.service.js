@@ -1,5 +1,6 @@
 // Servicio de reservas: listado propio, creación, cancelación
-const bookingsRepo = require('../repositories/bookings.repository');
+const bookingsRepo  = require('../repositories/bookings.repository');
+const elderlyRepo   = require('../repositories/elderly.repository');
 
 /**
  * Obtiene las reservas del cliente autenticado.
@@ -11,9 +12,10 @@ const getMyBookings = async (clientId) => {
 /**
  * Crea una nueva reserva para el cliente autenticado.
  * @param {number} clientId - ID del usuario autenticado
- * @param {object} body - { provider_id, date, time, duration_hours, notes, total_price }
+ * @param {object} body - { provider_id, date, time, duration_hours, notes, total_price, elderly_id }
+ * @param {string} userRole - rol del usuario autenticado
  */
-const createBooking = async (clientId, { provider_id, date, time, duration_hours, notes, total_price }) => {
+const createBooking = async (clientId, { provider_id, date, time, duration_hours, notes, total_price, elderly_id }, userRole) => {
   if (!provider_id || !date || !time || !duration_hours || total_price === undefined || total_price === null) {
     const err = new Error('Faltan campos requeridos: provider_id, date, time, duration_hours, total_price');
     err.statusCode = 400;
@@ -33,6 +35,26 @@ const createBooking = async (clientId, { provider_id, date, time, duration_hours
     throw err;
   }
 
+  // Familiar debe indicar para quién es la reserva
+  if (userRole === 'familiar' && !elderly_id) {
+    const err = new Error('Debes seleccionar la persona para quien realizas la reserva.');
+    err.statusCode = 400;
+    throw err;
+  }
+
+  // Validar que el adulto mayor pertenezca al cliente autenticado
+  let resolvedElderlyId = null;
+  if (elderly_id) {
+    const elderlyList = await elderlyRepo.findByUserId(clientId);
+    const match = elderlyList.find(ep => ep.id === Number(elderly_id));
+    if (!match) {
+      const err = new Error('La persona seleccionada no pertenece a tu cuenta.');
+      err.statusCode = 403;
+      throw err;
+    }
+    resolvedElderlyId = match.id;
+  }
+
   const booking = await bookingsRepo.create({
     clientId,
     providerId: provider_id,
@@ -41,6 +63,7 @@ const createBooking = async (clientId, { provider_id, date, time, duration_hours
     durationHours: 1,
     totalPrice: total_price,
     notes: cleanNotes,
+    elderlyId: resolvedElderlyId,
   });
 
   return booking;

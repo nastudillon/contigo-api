@@ -15,6 +15,9 @@ const USER_PUBLIC_SELECT = `
   google_sub,
   COALESCE(status, CASE WHEN role IS NULL THEN 'ONBOARDING' ELSE 'ACTIVE' END) AS status,
   COALESCE(profile_completed, role IS NOT NULL) AS profile_completed,
+  birth_date,
+  street_address,
+  commune_id,
   created_at,
   updated_at
 `;
@@ -131,7 +134,7 @@ const createElderlyContact = async ({ userId, contactName, contactPhone, relatio
 };
 
 /**
- * Actualiza campos editables del usuario (name, phone, rut)
+ * Actualiza el avatar del usuario.
  */
 const updateAvatarUrl = async (userId, avatarUrl) => {
   const { rows } = await pool.query(
@@ -150,20 +153,158 @@ const updateFields = async (userId, { name, phone, rut, relation } = {}) => {
   const params = [];
   let idx = 1;
 
-  if (name     !== undefined) { setClauses.push(`name     = $${idx++}`); params.push(name); }
-  if (phone    !== undefined) { setClauses.push(`phone    = $${idx++}`); params.push(phone); }
-  if (rut      !== undefined) { setClauses.push(`rut      = $${idx++}`); params.push(rut); }
-  if (relation !== undefined) { setClauses.push(`relation = $${idx++}`); params.push(relation); }
+  if (name !== undefined) {
+    setClauses.push(`name = $${idx++}`);
+    params.push(name);
+  }
+  if (phone !== undefined) {
+    setClauses.push(`phone = $${idx++}`);
+    params.push(phone);
+  }
+  if (rut !== undefined) {
+    setClauses.push(`rut = $${idx++}`);
+    params.push(rut);
+  }
+  if (relation !== undefined) {
+    setClauses.push(`relation = $${idx++}`);
+    params.push(relation);
+  }
 
   if (setClauses.length === 0) return;
 
-  setClauses.push(`updated_at = NOW()`);
+  setClauses.push('updated_at = NOW()');
   params.push(userId);
 
   await pool.query(
     `UPDATE users SET ${setClauses.join(', ')} WHERE id = $${idx}`,
     params
   );
+};
+
+const findElderlyProfileByUserId = async (userId) => {
+  const { rows } = await pool.query(
+    `SELECT u.id,
+            u.name,
+            u.email,
+            u.phone,
+            u.rut,
+            u.birth_date,
+            u.street_address,
+            u.commune_id,
+            c.name AS commune_name,
+            r.id AS region_id,
+            r.name AS region_name,
+            ec.contact_name AS support_name,
+            ec.contact_phone AS support_phone,
+            ec.relation AS support_relationship
+     FROM users u
+     LEFT JOIN communes c ON c.id = u.commune_id
+     LEFT JOIN regions r ON r.id = c.region_id
+     LEFT JOIN LATERAL (
+       SELECT contact_name, contact_phone, relation
+       FROM elderly_contacts
+       WHERE user_id = u.id
+       ORDER BY id DESC
+       LIMIT 1
+     ) ec ON true
+     WHERE u.id = $1`,
+    [userId]
+  );
+  return rows[0] || null;
+};
+
+const updateElderlyProfile = async (
+  userId,
+  {
+    name,
+    phone,
+    rut,
+    birthDate,
+    streetAddress,
+    communeId,
+    supportName,
+    supportPhone,
+    supportRelationship,
+  } = {}
+) => {
+  const client = await pool.connect();
+
+  try {
+    await client.query('BEGIN');
+
+    const setClauses = [];
+    const params = [];
+    let idx = 1;
+
+    if (name !== undefined) {
+      setClauses.push(`name = $${idx++}`);
+      params.push(name);
+    }
+    if (phone !== undefined) {
+      setClauses.push(`phone = $${idx++}`);
+      params.push(phone);
+    }
+    if (rut !== undefined) {
+      setClauses.push(`rut = $${idx++}`);
+      params.push(rut);
+    }
+    if (birthDate !== undefined) {
+      setClauses.push(`birth_date = $${idx++}`);
+      params.push(birthDate || null);
+    }
+    if (streetAddress !== undefined) {
+      setClauses.push(`street_address = $${idx++}`);
+      params.push(streetAddress || null);
+    }
+    if (communeId !== undefined) {
+      setClauses.push(`commune_id = $${idx++}`);
+      params.push(communeId || null);
+    }
+
+    if (setClauses.length > 0) {
+      setClauses.push('updated_at = NOW()');
+      params.push(userId);
+      await client.query(
+        `UPDATE users SET ${setClauses.join(', ')} WHERE id = $${idx}`,
+        params
+      );
+    }
+
+    const shouldSaveContact = [supportName, supportPhone, supportRelationship].some((value) => value !== undefined);
+    if (shouldSaveContact) {
+      const { rows: existingRows } = await client.query(
+        'SELECT id FROM elderly_contacts WHERE user_id = $1 ORDER BY id DESC LIMIT 1',
+        [userId]
+      );
+      const existingId = existingRows[0]?.id;
+
+      if (existingId) {
+        await client.query(
+          `UPDATE elderly_contacts
+           SET contact_name = $1,
+               contact_phone = $2,
+               relation = $3
+           WHERE id = $4`,
+          [supportName || '', supportPhone || '', supportRelationship || null, existingId]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO elderly_contacts (user_id, contact_name, contact_phone, relation)
+           VALUES ($1, $2, $3, $4)`,
+          [userId, supportName || '', supportPhone || '', supportRelationship || null]
+        );
+      }
+    }
+
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+
+  return findElderlyProfileByUserId(userId);
 };
 
 /**
@@ -185,5 +326,7 @@ module.exports = {
   createElderlyContact,
   updateFields,
   updateAvatarUrl,
+  findElderlyProfileByUserId,
+  updateElderlyProfile,
   countAll,
 };

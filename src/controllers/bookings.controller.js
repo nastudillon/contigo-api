@@ -21,7 +21,7 @@ const getMyBookings = async (req, res, next) => {
  */
 const createBooking = async (req, res, next) => {
   try {
-    const booking = await bookingsService.createBooking(req.user.id, req.body);
+    const booking = await bookingsService.createBooking(req.user.id, req.body, req.user.role);
     return successResponse(res, 'Reserva creada exitosamente', { booking }, 201);
   } catch (err) {
     next(err);

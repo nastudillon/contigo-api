@@ -3,17 +3,20 @@ const pool = require('../db/pool');
 
 /**
  * Obtiene todas las reservas de un cliente (usuario autenticado)
- * Incluye nombre del prestador y categoría
+ * Incluye nombre del prestador, categoría y persona atendida
  */
 const findByClientId = async (clientId) => {
   const { rows } = await pool.query(
     `SELECT b.*,
             u.name AS provider_name,
-            c.label AS category_label
+            c.label AS category_label,
+            ep.name AS elderly_name,
+            ep.relation AS elderly_relation
      FROM bookings b
      JOIN providers p ON b.provider_id = p.id
      JOIN users u ON p.user_id = u.id
      LEFT JOIN categories c ON p.category_id = c.id
+     LEFT JOIN elderly_people ep ON b.elderly_id = ep.id
      WHERE b.client_id = $1
      ORDER BY b.date DESC, b.time DESC`,
     [clientId]
@@ -23,16 +26,29 @@ const findByClientId = async (clientId) => {
 
 /**
  * Obtiene todas las reservas asignadas a un prestador
- * Incluye datos del cliente
+ * Incluye datos del cliente y persona atendida
  */
 const findByProviderId = async (providerId) => {
   const { rows } = await pool.query(
     `SELECT b.*,
-            u.name AS client_name,
-            u.email AS client_email,
-            u.phone AS client_phone
+            u.name        AS client_name,
+            u.email       AS client_email,
+            u.phone       AS client_phone,
+            u.relation    AS client_relation,
+            ep.name       AS elderly_name,
+            ep.relation   AS elderly_relation,
+            ep.address    AS elderly_address,
+            ep.age        AS elderly_age,
+            ep.commune_id AS elderly_commune_id,
+            com.name      AS elderly_commune,
+            cat.label     AS category_label,
+            prov.consultation_address AS provider_consultation_address
      FROM bookings b
      JOIN users u ON b.client_id = u.id
+     LEFT JOIN elderly_people ep ON b.elderly_id = ep.id
+     LEFT JOIN communes com ON com.id = ep.commune_id
+     LEFT JOIN providers prov ON prov.id = b.provider_id
+     LEFT JOIN categories cat ON cat.id = prov.category_id
      WHERE b.provider_id = $1
      ORDER BY b.date DESC, b.time DESC`,
     [providerId]
@@ -54,13 +70,13 @@ const findById = async (id) => {
 /**
  * Crea una nueva reserva
  */
-const create = async ({ clientId, providerId, date, time, durationHours, totalPrice, notes }) => {
+const create = async ({ clientId, providerId, date, time, durationHours, totalPrice, notes, elderlyId }) => {
   try {
     const { rows } = await pool.query(
-      `INSERT INTO bookings (client_id, provider_id, date, time, duration_hours, total_price, notes, status, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW(), NOW())
+      `INSERT INTO bookings (client_id, provider_id, date, time, duration_hours, total_price, notes, elderly_id, status, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', NOW(), NOW())
        RETURNING *`,
-      [clientId, providerId, date, time, durationHours, totalPrice, notes || null]
+      [clientId, providerId, date, time, durationHours, totalPrice, notes || null, elderlyId || null]
     );
     return rows[0];
   } catch (error) {

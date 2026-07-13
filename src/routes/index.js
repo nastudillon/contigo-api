@@ -62,6 +62,43 @@ router.get('/providers/:id/availability', providersController.getAvailability);
 // ──────────────────────────────────────────────
 // USERS (perfil editable)
 // ──────────────────────────────────────────────
+router.get('/users/me/profile', authMiddleware, async (req, res, next) => {
+  try {
+    const usersRepo = require('../repositories/users.repository');
+    const profile = await usersRepo.findElderlyProfileByUserId(req.user.id);
+    return require('../utils/responses').successResponse(res, 'Perfil obtenido', profile);
+  } catch (err) { next(err); }
+});
+
+router.patch('/users/me/profile', authMiddleware, async (req, res, next) => {
+  try {
+    const usersRepo = require('../repositories/users.repository');
+    const {
+      name,
+      phone,
+      rut,
+      birthDate,
+      streetAddress,
+      communeId,
+      supportName,
+      supportPhone,
+      supportRelationship,
+    } = req.body;
+    const profile = await usersRepo.updateElderlyProfile(req.user.id, {
+      name,
+      phone,
+      rut,
+      birthDate,
+      streetAddress,
+      communeId,
+      supportName,
+      supportPhone,
+      supportRelationship,
+    });
+    return require('../utils/responses').successResponse(res, 'Perfil actualizado', profile);
+  } catch (err) { next(err); }
+});
+
 router.patch('/users/me', authMiddleware, async (req, res, next) => {
   try {
     const usersRepo = require('../repositories/users.repository');
